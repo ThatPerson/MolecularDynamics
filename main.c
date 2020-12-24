@@ -2,7 +2,6 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-
 #define TRUE 1
 #define FALSE 0
 
@@ -17,7 +16,7 @@
 						// If you've got some weird compound may need to increase
 
 struct Vector {
-	float x, y, z;
+	double x, y, z;
 };
 
 struct Model {
@@ -38,7 +37,7 @@ struct Atom {
 	int check;
 	int lim_bonds;
 	struct Atom ** bonds;
-	char name[2];
+	char name[20];
 	int type;
 	int i;
 };
@@ -50,7 +49,34 @@ struct Molecule {
 	struct Model *model;
 };
 
+/** 
+ * Generates uniform random long double from 0 to 1 inclusive.
+ * @return long double
+ *  Long double containing uniform random number.
+ */
+long double uniform_rand(void) {
+	return ((long double) rand() + 1.) / ((long double) RAND_MAX + 1.);
+}
 
+/**
+ * Uses Box-Muller method to generate a normally distributed random number.
+ * @param mean
+ *  Mean of normal distribution to select random variable from
+ * @param std
+ *  Standard deviation of normal distribution from which random variable selected
+ * @return float
+ *  Returns normally distributed random number
+ */
+double norm_rand(double mean, double std) {
+	// Box-Muller method
+	double rnd1, rnd2;
+	rnd1 = (double) uniform_rand();
+	rnd2 = (double) uniform_rand();
+	double unadj = sqrt(-2 * log(rnd1)) * cos(2 * M_PI * rnd2);
+
+	//printf("%f, %f, %f\n", rnd1, rnd2, mean + std*unadj);
+	return mean + std * unadj;
+}
 
 void setup_model(struct Model * m, int model) {
 	if (model == MOD_MM3) {
@@ -154,7 +180,7 @@ void reset_check(struct Molecule *m) {
  * Error modes;
  *  - If atom at *a not allocated memory, will segfault.
  */
-int add_atom(struct Atom *a, float x, float y, float z, char name[2]) {
+int add_atom(struct Atom *a, float x, float y, float z, char name[20]) {
 	a->v.x = x;
 	a->v.y = y;
 	a->v.z = z;
@@ -163,13 +189,16 @@ int add_atom(struct Atom *a, float x, float y, float z, char name[2]) {
 	a->vel.z = 0;
 	a->n_bonds = 0;
 	a->lim_bonds = INITIAL_BONDS;
-	strcpy(a->name, name);
+	int c_buf = 0;
+	while (name[c_buf] == ' ')
+		c_buf++;
+	strcpy(a->name, name+c_buf);
 	a->check = FALSE;
-	if (strcmp(name, "H") == 0)
+	if (a->name[0] == 'H') {
 		a->type = ATOM_H;
-	else if (strcmp(name, "C") == 0)
+	} else if (a->name[0] == 'C'){
 		a->type = ATOM_C;
-	else {
+	} else {
 		printf("Atom %s not added.\n", name);
 		a->type = ATOM_UNKNOWN;
 	}
@@ -201,6 +230,13 @@ int add_bond(struct Atom *a, struct Atom *b) {
 		b->bonds = (struct Atom **) realloc(b->bonds, sizeof(struct Atom *) * b->lim_bonds);
 	}
 	return 1;
+}
+
+void set_vector(struct Vector *a, double x, double y, double z) {
+	a->x = x;
+	a->y = y;
+	a->z = z;
+	return;
 }
 
 /* free_atoms()
@@ -350,11 +386,16 @@ double calc_omega(struct Vector *a, struct Vector *b, struct Vector *c, struct V
 	return acos(v);
 }
 
-
+double calc_distance(struct Vector *a, struct Vector *b) {
+	double su = 0;
+	su += powl(a->x - b->x, 2.);
+	su += powl(a->y - b->y, 2.);
+	su += powl(a->z - b->z, 2.);
+	return sqrtl(su);
+}
 
 double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) {
-	return 1;
-	/*unsigned int i,j,k,l;
+	unsigned int i,j,k,l;
 	struct Atom *a,*b,*c,*d;
 	struct Vector zero;
 	zero.x = 0; zero.y = 0; zero.z = 0;
@@ -369,7 +410,6 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 		add_vector(&(a->v), (i == atom_offset)?offset:&(zero), &apos);
 		for (j = 0; j < a->n_bonds; j++) {
 			b = a->bonds[j];
-			printf("Considering %s-%s\n", a->name, b->name);
 			add_vector(&(b->v), (b->i == atom_offset)?offset:&(zero), &bpos);
 			K = m->model->blK[a->type][b->type];
 			l0 = m->model->bl[a->type][b->type];
@@ -386,7 +426,6 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 					h_bonds = 2;
 				c = a->bonds[k];
 				add_vector(&(c->v), (c->i == atom_offset)?offset:&(zero), &cpos);
-				printf("Considering %s-[%s]-%s\n", b->name, a->name, c->name);
 				K = m->model->bbK[b->type][a->type][c->type];
 				phi0 = m->model->bb[b->type][a->type][c->type][h_bonds];
 				phi = calc_phi(&bpos, &apos, &cpos);
@@ -397,7 +436,6 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 
 				for (l = 0; l < c->n_bonds; l++) {
 					d = c->bonds[l];
-					printf("Considering %s-[%s]-%s-%s\n", b->name, a->name, c->name, d->name);
 					add_vector(&(d->v), (d->i == atom_offset)?offset:&(zero), &dpos);
 					omega = calc_omega(&bpos, &apos, &cpos, &dpos);
 					V[0] = m->model->bt[b->type][a->type][c->type][d->type][0];
@@ -418,15 +456,71 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 			r = calc_distance(&apos, &bpos);
 			if (r == 0)
 				continue;
-			printf("Considering %s --- %s\n", a->name, b->name);
 			vdw = -2.25 * powl(l0 / r, 6.);
 			vdw += 1.84 * powl(10, 5.) * expl(-12 *(r/l0));
 			energy += m->model->vdwE[a->type] * vdw;
 
 		}
 	}
-	return energy;*/
+	return energy;
 			
+}
+
+void process_atom(int id, struct Molecule *m, double dn, double dt, double viscosity, double T) {
+	struct Vector o1, o2;
+	struct Vector e_grad;
+	double e1, e2, gradient; 
+	set_vector(&o1, dn, 0, 0);
+	set_vector(&o2, -dn, 0, 0);
+	e1 = calc_energy(m, id, &o1);
+	e2 = calc_energy(m, id, &o2);
+	e_grad.x = (e1 - e2) / (2 * dn);
+
+	set_vector(&o1, 0, dn, 0);
+	set_vector(&o2, 0, -dn, 0);
+	e1 = calc_energy(m, id, &o1);
+	e2 = calc_energy(m, id, &o2);
+	e_grad.y = (e1 - e2) / (2 * dn);
+
+	set_vector(&o1, 0, 0, dn);
+	set_vector(&o2, 0, 0, -dn);
+	e1 = calc_energy(m, id, &o1);
+	e2 = calc_energy(m, id, &o2);
+	e_grad.z = (e1 - e2) / (2 * dn);
+
+	double mass = m->model->vdwM[m->as[id].type];
+
+	struct Vector accel;
+	// potential term
+
+	double t1, t2, t3;
+	t1 = -0.00239 * e_grad.x;
+	accel.x = -0.00239 * e_grad.x;
+	accel.y = -0.00239 * e_grad.y;
+	accel.z = -0.00239 * e_grad.z;
+
+	t2 = -viscosity * m->as[id].vel.x;
+	accel.x -= viscosity * m->as[id].vel.x;
+	accel.y -= viscosity * m->as[id].vel.y;
+	accel.z -= viscosity * m->as[id].vel.z;
+
+	double boltzmann_k = 0.83145; // Angstrom^2 AMU ps^-2 K^-1
+	double R =  norm_rand(0, .1); // need to check this.
+	double sqterm = sqrtl(2 * viscosity * boltzmann_k * T);
+
+	t3 = sqterm * norm_rand(0, 1);
+	accel.x += t3; 
+	accel.y += sqterm * norm_rand(0, 1);
+	accel.z += sqterm * norm_rand(0, 1);
+
+	//printf("%d : %lf %lf %lf (%lf : %lf : %lf)\n", id, t1, t2, t3, sqterm, viscosity, T);
+
+	m->as[id].vel.x += dt * accel.x / mass;
+	m->as[id].vel.y += dt * accel.y / mass;
+	m->as[id].vel.z += dt * accel.z / mass;
+	//printf("%d: (%f, %f, %f)\n", id, m->as[id].vel.x,\
+		m->as[id].vel.y, m->as[id].vel.z);
+	return;
 }
 	
 /* bond_xyz()
@@ -466,6 +560,7 @@ int read_xyz(struct Molecule *m, char *filename) {
 	FILE * fp;
 	char line[255];
 	size_t len=255;
+	printf("Reading xyz\n");
 	fp = fopen(filename, "r");
 	if (fp == NULL) {
 		printf("%s not found.\n", filename);
@@ -486,6 +581,8 @@ int read_xyz(struct Molecule *m, char *filename) {
 			} 
 			// allocate memory for n_atoms atoms.
 			m->as = (struct Atom *) malloc(sizeof(struct Atom) * m->n_atoms);
+			if (m->as == NULL)
+				crash(m);
 		} else if (c_line >= 2) {
 			// c_line = 1 is a comment line, which we ignore.
 			// if the current atom (c_line - 2) is greater than n_atoms - 1, 
@@ -500,7 +597,7 @@ int read_xyz(struct Molecule *m, char *filename) {
 			char *token = strtok(line, " \t");
 			int i = 0;
 			float x, y, z;
-			char name[2];
+			char name[3];
 			// while tokens are left...
 			// i gives the column. First column is atom symbol, then x,y,z.
 			while (token) {
@@ -513,17 +610,29 @@ int read_xyz(struct Molecule *m, char *filename) {
 					default: fclose(fp); return -1; break;
 				}
 				i++;
-
 				token = strtok(NULL, " \t");
 			}
 			// add atom, and print out setup.
 			add_atom(ca, x, y, z, name);
-			printf("%s :: (%f, %f, %f) %d\n", ca->name, ca->v.x, ca->v.y, ca->v.z, c_line-2);
+			//printf("%s :: (%f, %f, %f) %d\n", ca->name, ca->v.x, ca->v.y, ca->v.z, c_line-2);
 		}
 		c_line++;
 	}
 	fclose(fp);
 	return 1;
+}
+
+double calc_temperature(struct Molecule *m) {
+	double boltzmann_k = 0.83145, v; // Angstrom^2 AMU ps^-2 K^-1
+	//T = m v^2 / (2k)
+	int i;
+	double sum = 0, mass;
+	for (i = 0; i < m->n_atoms; i++) {
+		v = magnitude(&(m->as[i].vel));
+		mass = m->model->vdwM[m->as[i].type];
+		sum += (mass * v * v) / (2 * boltzmann_k);
+	}
+	return sum / m->n_atoms;
 }
 
 /* save_xyz()
@@ -538,7 +647,7 @@ int save_xyz(struct Molecule *m, char *filename, char * mode) {
 	if (fp == NULL)
 		return -1;
 	
-	fprintf(fp, "%d\n\n", m->n_atoms);
+	fprintf(fp, "%d\n%lf\n", m->n_atoms, calc_temperature(m));
 	int i;
 	for (i = 0; i < m->n_atoms; i++) {
 		fprintf(fp, "%2s\t%-2.6f\t%-2.6f\t%-2.6f\n", m->as[i].name, \
@@ -548,6 +657,7 @@ int save_xyz(struct Molecule *m, char *filename, char * mode) {
 	}
 	
 	fclose(fp);
+	return 1;
 }
 
 /* print_dir()
@@ -576,6 +686,72 @@ int assign_model(struct Molecule *m, char model_name[255]) {
 	m->model = &mod;
 	return 1;
 	
+}
+
+#define MINIMIZE 0
+#define HEAT 1
+#define PROD 2
+
+void add_vector_sc(struct Vector *a, struct Vector *b, double dt) {
+	a->x += (b->x * dt);
+	a->y += (b->y * dt);
+	a->z += (b->z * dt);
+}
+
+void propagate(struct Molecule *m, double dn, double dt, int steps, int output_step, char fn[500], double temp, double viscosity, int mode) {
+	int i, k;
+
+	//void process_atom(int id, struct Molecule *m, double dn, double dt, double viscosity, double T) {
+
+	save_xyz(m, fn, "w");
+	for (i = 0; i < steps; i++) {
+		#pragma omp parallel for
+		for (k = 0; k < m->n_atoms; k++) {
+			process_atom(k, m, dn, dt, viscosity, temp);
+			add_vector_sc(&(m->as[k].v), &(m->as[k].vel), dt);
+			if (mode == MINIMIZE)
+				set_vector(&(m->as[k].vel), 0, 0, 0);
+
+		}
+		if (i % output_step == 0)
+			save_xyz(m, fn, "a");
+	}
+}
+
+void minimize(struct Molecule *m, double dn, double dt, int steps, int output_step, char fn[500]) {
+	propagate(m, dn, dt, steps, output_step, fn, 0, 0, MINIMIZE);
+}
+
+void set_temp_vel(struct Molecule *m, int atomid, double temp) {
+	double boltzmann_k = 0.83145; // Angstrom^2 AMU ps^-2 K^-1
+	struct Vector v;
+
+	v.x = (rand()%100)/100.;
+	v.y = (rand()%100)/100.;
+	v.z = (rand()%100)/100.;
+	normalise(&v);
+
+	double mass = m->model->vdwM[m->as[atomid].type];
+
+	double temp_factor = sqrtl(2 * boltzmann_k * temp / mass);
+
+	m->as[atomid].vel.x = v.x * temp_factor;
+	m->as[atomid].vel.y = v.y * temp_factor;
+	m->as[atomid].vel.z = v.z * temp_factor;
+}
+
+void heat(struct Molecule *m, double temp) {
+	int i;
+	for (i = 0; i < m->n_atoms; i++) {
+		set_temp_vel(m, i, temp);
+	}
+	return;
+}
+
+
+
+void production(struct Molecule *m, double dn, double dt, int steps, int output_step, char fn[500], double temp, double viscosity) {
+	propagate(m, dn, dt, steps, output_step, fn, temp, viscosity, PROD);
 }
 
 /* run_script()
@@ -610,6 +786,11 @@ int run_script(char *filename, struct Molecule *m) {
 	int A, B, n;
 	char command[255];
 	int c;
+	struct Vector zero;
+	double dn, dt, temp, viscosity;
+	unsigned int i;
+	int steps, output_step;
+	zero.x = 0; zero.y = 0; zero.z = 0;
 	while (fgets(line, len, fp)) {
 		// reset system checks
 		reset_check(m);
@@ -642,6 +823,34 @@ int run_script(char *filename, struct Molecule *m) {
 				break;
 			}
 			assign_model(m, command);
+		} else if (strcmp(command, "energy") == 0) {
+			if (m->model == NULL)
+				printf("No model assigned\n");
+			else
+				printf("Energy: %f kcal/mol\n", calc_energy(m, 0, &zero));
+		} else if (strcmp(command, "minimize") == 0) {
+			if (sscanf(line + c, "%lf %lf %d %d %s", &dn, &dt, &steps, &output_step, command) != 5) {
+				printf("Error reading script\n%s", line);
+				break;
+			}
+			if (steps < 0)
+				break;
+
+			minimize(m, dn, dt, steps, output_step, command);
+		} else if (strcmp(command, "heat") == 0) {
+			if (sscanf(line + c, "%lf", &temp) != 1) {
+				printf("Error reading script\n%s", line);
+				break;
+			}
+			heat(m, temp);
+		} else if (strcmp(command, "prod") == 0) {
+			if (sscanf(line + c, "%lf %lf %lf %lf %d %d %s", &dn, &dt, &temp, &viscosity, &steps, &output_step, command) != 7) {
+				printf("Error reading script\n%s", line);
+				break;
+			}
+			if (steps < 0)
+				break;
+			production(m, dn, dt, steps, output_step, command, temp, viscosity);
 		}
 	}
 	fclose(fp);
