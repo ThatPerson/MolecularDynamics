@@ -350,19 +350,82 @@ double calc_omega(struct Vector *a, struct Vector *b, struct Vector *c, struct V
 	return acos(v);
 }
 
-double calc_energy(struct Molecule *m, int atom_offset, struct Vector offset) {
-	unsigned int i,j,k,l;
+
+
+double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) {
+	return 1;
+	/*unsigned int i,j,k,l;
 	struct Atom *a,*b,*c,*d;
 	struct Vector zero;
 	zero.x = 0; zero.y = 0; zero.z = 0;
 	struct Vector apos, bpos, cpos, dpos;
+	double K, l0, phi0, phi, divphi, multi, omega, V[3];
+	double energy = 0;
+	double divl;
+	int h_bonds = 0;
+	double vdw, r;
 	for (i = 0; i < m->n_atoms; i++) {
-		a = &(m->atoms[i]);
-		add_vector(a->v, (i == atom_offset)?&(offset):&(zero), &apos);
+		a = &(m->as[i]);
+		add_vector(&(a->v), (i == atom_offset)?offset:&(zero), &apos);
 		for (j = 0; j < a->n_bonds; j++) {
-			c = &(m->bonds[j]);
-			add_vector(c->v, (c->i == atom_offset)?&(offset):&(zero), &apos);
-		
+			b = a->bonds[j];
+			printf("Considering %s-%s\n", a->name, b->name);
+			add_vector(&(b->v), (b->i == atom_offset)?offset:&(zero), &bpos);
+			K = m->model->blK[a->type][b->type];
+			l0 = m->model->bl[a->type][b->type];
+			divl = calc_distance(&apos, &bpos) - l0;
+			energy += 71.94 * K * powl(divl, 2.) * (1 - 2.55 * divl + 2.55 * (7/12.) * powl(divl, 2.));
+			for (k = j+1; k < a->n_bonds; k++) {
+				h_bonds = 0;
+				for (l = 0; l < a->n_bonds; l++) {
+					if (l == k || l == j)
+						continue;
+					h_bonds += (a->bonds[i]->type == ATOM_H)?1:0;
+				}
+				if (h_bonds > 2)
+					h_bonds = 2;
+				c = a->bonds[k];
+				add_vector(&(c->v), (c->i == atom_offset)?offset:&(zero), &cpos);
+				printf("Considering %s-[%s]-%s\n", b->name, a->name, c->name);
+				K = m->model->bbK[b->type][a->type][c->type];
+				phi0 = m->model->bb[b->type][a->type][c->type][h_bonds];
+				phi = calc_phi(&bpos, &apos, &cpos);
+				divphi = phi - phi0;
+				multi = 1 + 0.014 * divphi + 5.6 * powl(10, -5.) * powl(divphi, 2.);
+				multi += -7*powl(10, -7.)*powl(divphi, 3.) + 9*powl(10, -10.)*powl(divphi, 4.);
+				energy += 0.021914 * K * powl(divphi, 2.) * multi;
+
+				for (l = 0; l < c->n_bonds; l++) {
+					d = c->bonds[l];
+					printf("Considering %s-[%s]-%s-%s\n", b->name, a->name, c->name, d->name);
+					add_vector(&(d->v), (d->i == atom_offset)?offset:&(zero), &dpos);
+					omega = calc_omega(&bpos, &apos, &cpos, &dpos);
+					V[0] = m->model->bt[b->type][a->type][c->type][d->type][0];
+					V[1] = m->model->bt[b->type][a->type][c->type][d->type][1];
+					V[2] = m->model->bt[b->type][a->type][c->type][d->type][2];
+					energy += ((V[0] / 2.) * (1 + cos(omega)));
+					energy += ((V[1] / 2.) * (1 - cos(2 * omega)));
+					energy += ((V[2] / 2.) * (1 + cos(3 * omega)));
+				}
+			}
+		}
+		for (j = 0; j < m->n_atoms; j++) {
+			if (i == j)
+				continue;
+			b = &(m->as[j]);
+			add_vector(&(b->v), (b->i == atom_offset)?offset:&(zero), &bpos);
+			l0 = m->model->vdwR[a->type] + m->model->vdwR[b->type];
+			r = calc_distance(&apos, &bpos);
+			if (r == 0)
+				continue;
+			printf("Considering %s --- %s\n", a->name, b->name);
+			vdw = -2.25 * powl(l0 / r, 6.);
+			vdw += 1.84 * powl(10, 5.) * expl(-12 *(r/l0));
+			energy += m->model->vdwE[a->type] * vdw;
+
+		}
+	}
+	return energy;*/
 			
 }
 	
