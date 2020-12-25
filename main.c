@@ -147,7 +147,7 @@ void setup_model(struct Model * m, int model) {
 		m->vdwM[ATOM_C] = 12.0;
 
 		m->vdwE[ATOM_H] = 0.020;
-		m->vdwR[ATOM_H] = .162; // note 10x smaller than given in paper.
+		m->vdwR[ATOM_H] = 1.62;
 		m->vdwM[ATOM_H] = 1.008;
 
 	}
@@ -508,10 +508,12 @@ void process_atom(int id, struct Molecule *m, double dn, double dt, double visco
 	double R =  norm_rand(0, .1); // need to check this.
 	double sqterm = sqrtl(2 * viscosity * boltzmann_k * T);
 
-	t3 = sqterm * norm_rand(0, 1);
+	double variance = 2 * mass * viscosity * boltzmann_k * T / dt;
+
+	t3 = sqterm * norm_rand(0, variance);
 	accel.x += t3; 
-	accel.y += sqterm * norm_rand(0, 1);
-	accel.z += sqterm * norm_rand(0, 1);
+	accel.y += sqterm * norm_rand(0, variance);
+	accel.z += sqterm * norm_rand(0, variance);
 
 	//printf("%d : %lf %lf %lf (%lf : %lf : %lf)\n", id, t1, t2, t3, sqterm, viscosity, T);
 
