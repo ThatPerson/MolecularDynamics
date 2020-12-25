@@ -2,6 +2,8 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <omp.h>
+
 #define TRUE 1
 #define FALSE 0
 
@@ -101,6 +103,7 @@ void setup_model(struct Model * m, int model) {
 				}
 			}
 		}
+		printf("m->bl is at %d\n", m->bl);
 		m->bl[ATOM_C][ATOM_C] = 1.5247;
 		m->bl[ATOM_C][ATOM_H] = 1.112;
 		m->bl[ATOM_H][ATOM_C] = 1.112;
@@ -408,13 +411,25 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 	for (i = 0; i < m->n_atoms; i++) {
 		a = &(m->as[i]);
 		add_vector(&(a->v), (i == atom_offset)?offset:&(zero), &apos);
+		
+		/*printf("Atom %d\n", i);
+		for (k = 0; k < 2; k++) {
+			for (l = 0; l < 2; l++) {
+				printf("model->bl[%d][%d] = %f\n", k, l, m->model->bl[k][l]);
+			}
+		}*/
+		
 		for (j = 0; j < a->n_bonds; j++) {
 			b = a->bonds[j];
 			add_vector(&(b->v), (b->i == atom_offset)?offset:&(zero), &bpos);
 			K = m->model->blK[a->type][b->type];
+
 			l0 = m->model->bl[a->type][b->type];
+			//printf("%f :: %d\n", l0, m->model->bl[a->type][b->type]);
 			divl = calc_distance(&apos, &bpos) - l0;
 			energy += 71.94 * K * powl(divl, 2.) * (1 - 2.55 * divl + 2.55 * (7/12.) * powl(divl, 2.));
+			//printf("\tmodel->bl[%d][%d] = %f\n", a->type, b->type, l0);
+			//printf("%d:%d %f kcal/mol\n", a->type, b->type, energy);
 			for (k = j+1; k < a->n_bonds; k++) {
 				h_bonds = 0;
 				for (l = 0; l < a->n_bonds; l++) {
@@ -520,8 +535,6 @@ void process_atom(int id, struct Molecule *m, double dn, double dt, double visco
 	m->as[id].vel.x += dt * accel.x / mass;
 	m->as[id].vel.y += dt * accel.y / mass;
 	m->as[id].vel.z += dt * accel.z / mass;
-	//printf("%d: (%f, %f, %f)\n", id, m->as[id].vel.x,\
-		m->as[id].vel.y, m->as[id].vel.z);
 	return;
 }
 	
@@ -676,7 +689,7 @@ int print_dir(struct Molecule *m) {
 	return 0;
 }
 
-int assign_model(struct Molecule *m, char model_name[255]) {
+/*int assign_model(struct Molecule *m, char model_name[255]) {
 	struct Model mod;
 	if (strcmp(model_name, "MM3") == 0)
 		setup_model(&mod, MOD_MM3);
@@ -688,7 +701,7 @@ int assign_model(struct Molecule *m, char model_name[255]) {
 	m->model = &mod;
 	return 1;
 	
-}
+}*/
 
 #define MINIMIZE 0
 #define HEAT 1
@@ -793,6 +806,7 @@ int run_script(char *filename, struct Molecule *m) {
 	unsigned int i;
 	int steps, output_step;
 	zero.x = 0; zero.y = 0; zero.z = 0;
+	struct Model mod;
 	while (fgets(line, len, fp)) {
 		// reset system checks
 		reset_check(m);
@@ -824,7 +838,13 @@ int run_script(char *filename, struct Molecule *m) {
 				printf("Error reading script\n%s", line);
 				break;
 			}
-			assign_model(m, command);
+			if (strcmp(command, "MM3") == 0)
+				setup_model(&mod, MOD_MM3);
+				
+			m->model = &mod;
+			
+ 
+			
 		} else if (strcmp(command, "energy") == 0) {
 			if (m->model == NULL)
 				printf("No model assigned\n");
