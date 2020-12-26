@@ -17,6 +17,19 @@
 #define INITIAL_BONDS 5 // Number of bonds per atom possible.
 						// If you've got some weird compound may need to increase
 
+	/* 1 kcal/mol = 4184 J/mol
+	 * = 4184 kg m^2 s^-2 mol^-1
+	 * = 4184 / (1.66*10^-27) amu m^2 s^-2 mol^-1
+	 * = (4184 * (10^10)^2) / (1.66*10^-27) amu A^2 s^-2 mol^-1
+	 * = (4184 * (10^10)^2 * (10^12)^-2) / (1.66*10^-27) amu A^2 ps^-2 mol^-1
+	 * = (4184 * (10^10)^2 * (10^12)^-2) / (1.66*10^-27 * 6.02*10^23) amu A^2 ps^-2 
+	 * = 418.68 amu A^2 ps^-2
+	 */
+#define KCAL_ATOMIC 418.68
+#define BOLTZMANN_K 0.001985875 * KCAL_ATOMIC // kb = 0.001985875 kcal mol^-1 K^-1, * 418.68 conversion.
+
+
+
 struct Vector {
 	double x, y, z;
 };
@@ -481,26 +494,36 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 			
 }
 
+double kcal_to_atomic(double v) {
+
+	return v * KCAL_ATOMIC;
+}
+
+double atomic_to_kcal(double v) {
+	return v / KCAL_ATOMIC;
+}
+
 void process_atom(int id, struct Molecule *m, double dn, double dt, double viscosity, double T) {
 	struct Vector o1, o2;
 	struct Vector e_grad;
 	double e1, e2, gradient; 
 	set_vector(&o1, dn, 0, 0);
 	set_vector(&o2, -dn, 0, 0);
-	e1 = calc_energy(m, id, &o1);
-	e2 = calc_energy(m, id, &o2);
+	e1 = kcal_to_atomic(calc_energy(m, id, &o1));
+	e2 = kcal_to_atomic(calc_energy(m, id, &o2));
 	e_grad.x = (e1 - e2) / (2 * dn);
+	//printf("e1: %f, e2: %f, dn: %f, grad: %f\n", e1, e2, dn, e_grad.x);
 
 	set_vector(&o1, 0, dn, 0);
 	set_vector(&o2, 0, -dn, 0);
-	e1 = calc_energy(m, id, &o1);
-	e2 = calc_energy(m, id, &o2);
+	e1 = kcal_to_atomic(calc_energy(m, id, &o1));
+	e2 = kcal_to_atomic(calc_energy(m, id, &o2));
 	e_grad.y = (e1 - e2) / (2 * dn);
 
 	set_vector(&o1, 0, 0, dn);
 	set_vector(&o2, 0, 0, -dn);
-	e1 = calc_energy(m, id, &o1);
-	e2 = calc_energy(m, id, &o2);
+	e1 = kcal_to_atomic(calc_energy(m, id, &o1));
+	e2 = kcal_to_atomic(calc_energy(m, id, &o2));
 	e_grad.z = (e1 - e2) / (2 * dn);
 
 	double mass = m->model->vdwM[m->as[id].type];
@@ -509,32 +532,37 @@ void process_atom(int id, struct Molecule *m, double dn, double dt, double visco
 	// potential term
 
 	double t1, t2, t3;
-	t1 = -0.00239 * e_grad.x;
-	accel.x = -0.00239 * e_grad.x;
-	accel.y = -0.00239 * e_grad.y;
-	accel.z = -0.00239 * e_grad.z;
+	t1 = -e_grad.x;
+	accel.x = -e_grad.x;
+	accel.y = -e_grad.y;
+	accel.z = -e_grad.z;
+	// energy units are amu A^2 ps^-2, so units of gradient are amu A ps^-2.
 
 	t2 = -viscosity * m->as[id].vel.x;
 	accel.x -= viscosity * m->as[id].vel.x;
 	accel.y -= viscosity * m->as[id].vel.y;
 	accel.z -= viscosity * m->as[id].vel.z;
+	// not sure about viscosity units. reported to be ps^-1, but there's no mass term here.
+	// so amu(?) ps^-1 A ps^-1 = amu A ps^-2
 
-	double boltzmann_k = 0.83145; // Angstrom^2 AMU ps^-2 K^-1
-	double R =  norm_rand(0, .1); // need to check this.
-	double sqterm = sqrtl(2 * viscosity * boltzmann_k * T);
-
-	double variance = 2 * mass * viscosity * boltzmann_k * T / dt;
-
-	t3 = sqterm * norm_rand(0, variance);
+	double variance = 2 * mass * viscosity * BOLTZMANN_K * T / dt;
+	// units are amu * ps^-1 * amu A^2 ps^-2 / K * K / ps
+	//    = amu^2 * ps^-4 * A^2
+	
+	double std = sqrtl(variance);
+	// so the units of the std are amu A ps^-2
+	
+	t3 = norm_rand(0, std);
 	accel.x += t3; 
-	accel.y += sqterm * norm_rand(0, variance);
-	accel.z += sqterm * norm_rand(0, variance);
+	accel.y += norm_rand(0, std);
+	accel.z += norm_rand(0, std);
 
-	//printf("%d : %lf %lf %lf (%lf : %lf : %lf)\n", id, t1, t2, t3, sqterm, viscosity, T);
+	//printf("%d : %lf %lf %lf (%lf : %lf : %lf)\n", id, t1, t2, t3, std, viscosity, T);
 
 	m->as[id].vel.x += dt * accel.x / mass;
 	m->as[id].vel.y += dt * accel.y / mass;
 	m->as[id].vel.z += dt * accel.z / mass;
+	// amu A ps^-2 * ps / amu = A ps^-1
 	return;
 }
 	
@@ -638,14 +666,14 @@ int read_xyz(struct Molecule *m, char *filename) {
 }
 
 double calc_temperature(struct Molecule *m) {
-	double boltzmann_k = 0.83145, v; // Angstrom^2 AMU ps^-2 K^-1
+	double v;
 	//T = m v^2 / (2k)
 	int i;
 	double sum = 0, mass;
 	for (i = 0; i < m->n_atoms; i++) {
 		v = magnitude(&(m->as[i].vel));
 		mass = m->model->vdwM[m->as[i].type];
-		sum += (mass * v * v) / (2 * boltzmann_k);
+		sum += (mass * v * v) / (2 * BOLTZMANN_K);
 	}
 	return sum / m->n_atoms;
 }
@@ -738,7 +766,6 @@ void minimize(struct Molecule *m, double dn, double dt, int steps, int output_st
 }
 
 void set_temp_vel(struct Molecule *m, int atomid, double temp) {
-	double boltzmann_k = 0.83145; // Angstrom^2 AMU ps^-2 K^-1
 	struct Vector v;
 
 	v.x = (rand()%100)/100.;
@@ -748,7 +775,7 @@ void set_temp_vel(struct Molecule *m, int atomid, double temp) {
 
 	double mass = m->model->vdwM[m->as[atomid].type];
 
-	double temp_factor = sqrtl(2 * boltzmann_k * temp / mass);
+	double temp_factor = sqrtl(2 * BOLTZMANN_K * temp / mass);
 
 	m->as[atomid].vel.x = v.x * temp_factor;
 	m->as[atomid].vel.y = v.y * temp_factor;
