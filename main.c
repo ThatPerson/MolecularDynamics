@@ -503,7 +503,24 @@ double atomic_to_kcal(double v) {
 	return v / KCAL_ATOMIC;
 }
 
+double calc_temperature(struct Molecule *m) {
+	double v;
+	//T = m v^2 / (2k)
+	int i;
+	double sum = 0, mass;
+	for (i = 0; i < m->n_atoms; i++) {
+		v = magnitude(&(m->as[i].vel));
+		mass = m->model->vdwM[m->as[i].type];
+		sum += (mass * v * v) / (2 * BOLTZMANN_K);
+	}
+	//printf("Temp: %f K\n", sum/m->n_atoms);
+	return sum / m->n_atoms;
+}
+
+
 void process_atom(int id, struct Molecule *m, double dn, double dt, double viscosity, double T) {
+
+	double Tr = T; //calc_temperature(m);
 	struct Vector o1, o2;
 	struct Vector e_grad;
 	double e1, e2, gradient; 
@@ -538,14 +555,14 @@ void process_atom(int id, struct Molecule *m, double dn, double dt, double visco
 	accel.z = -e_grad.z;
 	// energy units are amu A^2 ps^-2, so units of gradient are amu A ps^-2.
 
-	t2 = -viscosity * m->as[id].vel.x;
-	accel.x -= viscosity * m->as[id].vel.x;
-	accel.y -= viscosity * m->as[id].vel.y;
-	accel.z -= viscosity * m->as[id].vel.z;
+	t2 = -viscosity * mass * m->as[id].vel.x;
+	accel.x -= viscosity * mass * m->as[id].vel.x;
+	accel.y -= viscosity * mass * m->as[id].vel.y;
+	accel.z -= viscosity * mass * m->as[id].vel.z;
 	// not sure about viscosity units. reported to be ps^-1, but there's no mass term here.
 	// so amu(?) ps^-1 A ps^-1 = amu A ps^-2
 
-	double variance = 2 * mass * viscosity * BOLTZMANN_K * T / dt;
+	double variance = 2 * mass * viscosity * BOLTZMANN_K * Tr / dt;
 	// units are amu * ps^-1 * amu A^2 ps^-2 / K * K / ps
 	//    = amu^2 * ps^-4 * A^2
 	
@@ -665,18 +682,6 @@ int read_xyz(struct Molecule *m, char *filename) {
 	return 1;
 }
 
-double calc_temperature(struct Molecule *m) {
-	double v;
-	//T = m v^2 / (2k)
-	int i;
-	double sum = 0, mass;
-	for (i = 0; i < m->n_atoms; i++) {
-		v = magnitude(&(m->as[i].vel));
-		mass = m->model->vdwM[m->as[i].type];
-		sum += (mass * v * v) / (2 * BOLTZMANN_K);
-	}
-	return sum / m->n_atoms;
-}
 
 /* save_xyz()
  *  Outputs *m as an xyz file in *filename. Tab delimited, x y z are of 
@@ -689,8 +694,9 @@ int save_xyz(struct Molecule *m, char *filename, char * mode) {
 	fp = fopen(filename, mode);
 	if (fp == NULL)
 		return -1;
-	
-	fprintf(fp, "%d\n%lf\n", m->n_atoms, calc_temperature(m));
+	double T = calc_temperature(m);
+	fprintf(fp, "%d\n%lf\n", m->n_atoms, T);
+	printf("Temp: %f K\n", T); 
 	int i;
 	for (i = 0; i < m->n_atoms; i++) {
 		fprintf(fp, "%2s\t%-2.6f\t%-2.6f\t%-2.6f\n", m->as[i].name, \
