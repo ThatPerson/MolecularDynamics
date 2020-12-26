@@ -448,7 +448,7 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 				for (l = 0; l < a->n_bonds; l++) {
 					if (l == k || l == j)
 						continue;
-					h_bonds += (a->bonds[i]->type == ATOM_H)?1:0;
+					h_bonds += (a->bonds[l]->type == ATOM_H)?1:0;
 				}
 				if (h_bonds > 2)
 					h_bonds = 2;
