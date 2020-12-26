@@ -3,6 +3,8 @@ MolecularDynamics
 
 Very simple molecular dynamics model. Currently attempts to implement the MM3 forcefield for hydrocarbons [1]. Temperature control is implemented as a Langevin thermostat, however the units of this are currently wrong (this is very much a work in progress).
 
+1. Allinger, N. L., Yuh, Y. H. & Lii, J. H. Molecular mechanics. The MM3 force field for hydrocarbons. 1. J Am Chem Soc 111, 8551–8566 (1989).
+  
 
 Todo
 ----
