@@ -9,10 +9,12 @@
 
 #define ATOM_H 0
 #define ATOM_C 1
-#define ATOM_UNKNOWN 2
-#define ATOM_TYPES 3
+#define ATOM_O 2
+#define ATOM_UNKNOWN 3
+#define ATOM_TYPES 4
 
 #define MOD_MM3 1
+#define MOD_TIP3P 2
 
 #define INITIAL_BONDS 5 // Number of bonds per atom possible.
 						// If you've got some weird compound may need to increase
@@ -27,6 +29,14 @@
 	 */
 #define KCAL_ATOMIC 418.68
 #define BOLTZMANN_K 0.001985875 * KCAL_ATOMIC // kb = 0.001985875 kcal mol^-1 K^-1, * 418.68 conversion.
+
+// CC = 9.987551 * 10^9 N m^2 C^-2
+// 1 J = 1 N m
+// eg units are J m C^-2
+// so CC / 4184 kcal m / C^2 mol
+// CC * 10^-10 / 4184 kcal Ang / C^2 mol
+// = 
+#define COULOMB_CONSTANT 2.3871e-04
 
 #define LANGEVIN 0
 #define ANDERSEN 1
@@ -43,9 +53,10 @@ struct Model {
 	double bt[ATOM_TYPES][ATOM_TYPES][ATOM_TYPES][ATOM_TYPES][3];
 	double blK[ATOM_TYPES][ATOM_TYPES];
 	double bbK[ATOM_TYPES][ATOM_TYPES][ATOM_TYPES];
-	double vdwE[ATOM_TYPES];
+	double vdwE[ATOM_TYPES][ATOM_TYPES];
 	double vdwR[ATOM_TYPES];
 	double vdwM[ATOM_TYPES];
+	double charge[ATOM_TYPES];
 };
 
 struct Atom {
@@ -99,28 +110,29 @@ double norm_rand(double mean, double std) {
 }
 
 void setup_model(struct Model * m, int model) {
-	if (model == MOD_MM3) {
-		int i, k, l, p;
-		for (i = 0; i < ATOM_TYPES; i++) {
-			m->vdwE[i] = 0;
-			m->vdwR[i] = 0;
-			m->vdwM[i] = 0;
-			for (k = 0; k < ATOM_TYPES; k++) {
-				m->bl[i][k] = 0;
-				m->blK[i][k] = 0;
-				for (l = 0; l < ATOM_TYPES; l++) {
-					m->bb[i][k][l][0] = 0;
-					m->bb[i][k][l][1] = 0;
-					m->bb[i][k][l][2] = 0;
-					m->bbK[i][k][l] = 0;
-					for (p = 0; p < ATOM_TYPES; p++) {
-						m->bt[i][k][l][p][0] = 0;
-						m->bt[i][k][l][p][1] = 0;
-						m->bt[i][k][l][p][2] = 0;
-					}
+	int i, k, l, p;
+	for (i = 0; i < ATOM_TYPES; i++) {
+		//m->vdwE[i] = 0;
+		m->vdwR[i] = 0;
+		m->vdwM[i] = 0;
+		for (k = 0; k < ATOM_TYPES; k++) {
+			m->bl[i][k] = 0;
+			m->blK[i][k] = 0;
+			m->vdwE[i][k] = 0;
+			for (l = 0; l < ATOM_TYPES; l++) {
+				m->bb[i][k][l][0] = 0;
+				m->bb[i][k][l][1] = 0;
+				m->bb[i][k][l][2] = 0;
+				m->bbK[i][k][l] = 0;
+				for (p = 0; p < ATOM_TYPES; p++) {
+					m->bt[i][k][l][p][0] = 0;
+					m->bt[i][k][l][p][1] = 0;
+					m->bt[i][k][l][p][2] = 0;
 				}
 			}
 		}
+	}
+	if (model == MOD_MM3) {
 		printf("m->bl is at %d\n", m->bl);
 		m->bl[ATOM_C][ATOM_C] = 1.5247;
 		m->bl[ATOM_C][ATOM_H] = 1.112;
@@ -163,14 +175,39 @@ void setup_model(struct Model * m, int model) {
 		m->bt[ATOM_C][ATOM_C][ATOM_C][ATOM_C][1] = 0.170;
 		m->bt[ATOM_C][ATOM_C][ATOM_C][ATOM_C][2] = 0.520;
 
-		m->vdwE[ATOM_C] = 0.027;
+		m->vdwE[ATOM_C][ATOM_C] = 0.027;
 		m->vdwR[ATOM_C] = .204;
 		m->vdwM[ATOM_C] = 12.0;
 
-		m->vdwE[ATOM_H] = 0.020;
+		m->vdwE[ATOM_H][ATOM_H] = 0.020;
 		m->vdwR[ATOM_H] = 1.62;
 		m->vdwM[ATOM_H] = 1.008;
+		
+		m->vdwE[ATOM_C][ATOM_H] = 0.020;
+		m->vdwE[ATOM_H][ATOM_C] = 0.020; //?
+		
+		m->charge[ATOM_H] = 0;
+		m->charge[ATOM_C] = 0;
 
+	} else if (model == MOD_TIP3P) {
+		m->vdwM[ATOM_H] = 1.008;
+		m->charge[ATOM_H] = 0.417;
+		m->vdwR[ATOM_H] = 0.2;
+		m->vdwM[ATOM_O] = 15.9994;
+		m->charge[ATOM_O] = -0.834;
+		m->vdwR[ATOM_O] = 1.5753;
+
+		m->vdwE[ATOM_H][ATOM_H] = 0.0460;
+		m->vdwE[ATOM_O][ATOM_O] = 0.1521;
+		m->vdwE[ATOM_O][ATOM_H] = 0.0836;
+		m->vdwE[ATOM_H][ATOM_O] = 0.0836;
+		
+		m->bl[ATOM_H][ATOM_O] = 0.9572;
+		m->bl[ATOM_O][ATOM_H] = 0.9572;
+		m->blK[ATOM_H][ATOM_O] = 450/4184.;
+		m->blK[ATOM_O][ATOM_H] = 450/4184.;
+		m->bb[ATOM_H][ATOM_O][ATOM_H][0] = 104.52 * (M_PI / 180.);
+		m->bbK[ATOM_H][ATOM_O][ATOM_H] = 55 / 4184.;
 	}
 	return;
 }
@@ -219,6 +256,8 @@ int add_atom(struct Atom *a, float x, float y, float z, char name[20]) {
 		a->type = ATOM_H;
 	} else if (a->name[0] == 'C'){
 		a->type = ATOM_C;
+	} else if (a->name[0] == 'O') {
+		a->type = ATOM_O;
 	} else {
 		printf("Atom %s not added.\n", name);
 		a->type = ATOM_UNKNOWN;
@@ -440,6 +479,7 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 		}*/
 		
 		for (j = 0; j < a->n_bonds; j++) {
+			// Ebond
 			b = a->bonds[j];
 			add_vector(&(b->v), (b->i == atom_offset)?offset:&(zero), &bpos);
 			K = m->model->blK[a->type][b->type];
@@ -451,6 +491,7 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 			//printf("\tmodel->bl[%d][%d] = %f\n", a->type, b->type, l0);
 			//printf("%d:%d %f kcal/mol\n", a->type, b->type, energy);
 			for (k = j+1; k < a->n_bonds; k++) {
+				// Eangle
 				h_bonds = 0;
 				for (l = 0; l < a->n_bonds; l++) {
 					if (l == k || l == j)
@@ -470,6 +511,7 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 				energy += 0.021914 * K * powl(divphi, 2.) * multi;
 
 				for (l = 0; l < c->n_bonds; l++) {
+					// Edihedral
 					d = c->bonds[l];
 					add_vector(&(d->v), (d->i == atom_offset)?offset:&(zero), &dpos);
 					omega = calc_omega(&bpos, &apos, &cpos, &dpos);
@@ -483,8 +525,10 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 			}
 		}
 		for (j = 0; j < m->n_atoms; j++) {
+		
 			if (i == j)
 				continue;
+			// Evdw
 			b = &(m->as[j]);
 			add_vector(&(b->v), (b->i == atom_offset)?offset:&(zero), &bpos);
 			l0 = m->model->vdwR[a->type] + m->model->vdwR[b->type];
@@ -493,8 +537,15 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 				continue;
 			vdw = -2.25 * powl(l0 / r, 6.);
 			vdw += 1.84 * powl(10, 5.) * expl(-12 *(r/l0));
-			energy += m->model->vdwE[a->type] * vdw;
+			energy += m->model->vdwE[a->type][b->type] * vdw;
 
+
+			// Eelectrostatic
+			// Ees = ke q Q / r
+			double q, Q;
+			q = m->model->charge[a->type];
+			Q = m->model->charge[b->type];
+			energy += COULOMB_CONSTANT * q * Q / r;
 		}
 	}
 	return energy;
@@ -754,7 +805,7 @@ int save_xyz(struct Molecule *m, char *filename, char * mode) {
 		return -1;
 	double T = calc_temperature(m);
 	fprintf(fp, "%d\n%lf\n", m->n_atoms, T);
-	printf("Temp: %f K\n", T); 
+
 	int i;
 	for (i = 0; i < m->n_atoms; i++) {
 		fprintf(fp, "%2s\t%-2.6f\t%-2.6f\t%-2.6f\n", m->as[i].name, \
@@ -916,7 +967,8 @@ int run_script(char *filename, struct Molecule *m) {
 			}
 			if (strcmp(command, "MM3") == 0)
 				setup_model(&mod, MOD_MM3);
-				
+			else if (strcmp(command, "TIP3P") == 0)
+				setup_model(&mod, MOD_TIP3P);
 			m->model = &mod;
 			
  
