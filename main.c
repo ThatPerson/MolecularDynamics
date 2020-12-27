@@ -28,6 +28,9 @@
 #define KCAL_ATOMIC 418.68
 #define BOLTZMANN_K 0.001985875 * KCAL_ATOMIC // kb = 0.001985875 kcal mol^-1 K^-1, * 418.68 conversion.
 
+#define LANGEVIN 0
+#define ANDERSEN 1
+
 
 
 struct Vector {
@@ -55,6 +58,7 @@ struct Atom {
 	char name[20];
 	int type;
 	int i;
+	int andersen_f;
 };
 
 /* Molecule container - n_atoms in as struct. */
@@ -62,6 +66,7 @@ struct Molecule {
 	struct Atom *as;
 	int n_atoms;
 	struct Model *model;
+	int thermostat;
 };
 
 /** 
@@ -366,8 +371,10 @@ float magnitude(struct Vector *v) {
  */
 void normalise(struct Vector *v) {
 	float n = magnitude(v);
-	if (n == 0)
+	if (n == 0) {
+		printf("Division by 0\n");
 		return;
+	}
 	v->x /= n;
 	v->y /= n;
 	v->z /= n;
@@ -503,6 +510,28 @@ double atomic_to_kcal(double v) {
 	return v / KCAL_ATOMIC;
 }
 
+void set_temp_vel(struct Molecule *m, int atomid, double temp) {
+	struct Vector v;
+
+	v.x = ((rand()%100 - 50)/100.);
+	v.y = ((rand()%100 - 50)/100.);
+	v.z = ((rand()%100 - 50)/100.);
+	if (v.x == 0 && v.y == 0 && v.z == 0)
+		v.x = 1;
+	normalise(&v);
+	
+
+
+	double mass = m->model->vdwM[m->as[atomid].type];
+
+	double temp_factor = sqrtl(2 * BOLTZMANN_K * temp / mass);
+	//if (atomid == 1)
+		//printf("%lf, %lf, %lf :: %lf\n", v.x, v.y, v.z, temp_factor);
+	m->as[atomid].vel.x = v.x * temp_factor;
+	m->as[atomid].vel.y = v.y * temp_factor;
+	m->as[atomid].vel.z = v.z * temp_factor;
+}
+
 double calc_temperature(struct Molecule *m) {
 	double v;
 	//T = m v^2 / (2k)
@@ -547,38 +576,65 @@ void process_atom(int id, struct Molecule *m, double dn, double dt, double visco
 
 	struct Vector accel;
 	// potential term
-
 	double t1, t2, t3;
 	t1 = -e_grad.x;
 	accel.x = -e_grad.x;
 	accel.y = -e_grad.y;
 	accel.z = -e_grad.z;
 	// energy units are amu A^2 ps^-2, so units of gradient are amu A ps^-2.
+	if (m->thermostat == LANGEVIN) {
+		t2 = -viscosity * mass * m->as[id].vel.x;
+		accel.x -= viscosity * mass * m->as[id].vel.x;
+		accel.y -= viscosity * mass * m->as[id].vel.y;
+		accel.z -= viscosity * mass * m->as[id].vel.z;
+		// not sure about viscosity units. reported to be ps^-1, but there's no mass term here.
+		// so amu(?) ps^-1 A ps^-1 = amu A ps^-2
 
-	t2 = -viscosity * mass * m->as[id].vel.x;
-	accel.x -= viscosity * mass * m->as[id].vel.x;
-	accel.y -= viscosity * mass * m->as[id].vel.y;
-	accel.z -= viscosity * mass * m->as[id].vel.z;
-	// not sure about viscosity units. reported to be ps^-1, but there's no mass term here.
-	// so amu(?) ps^-1 A ps^-1 = amu A ps^-2
-
-	double variance = 2 * mass * viscosity * BOLTZMANN_K * Tr / dt;
-	// units are amu * ps^-1 * amu A^2 ps^-2 / K * K / ps
-	//    = amu^2 * ps^-4 * A^2
-	
-	double std = sqrtl(variance);
-	// so the units of the std are amu A ps^-2
-	
-	t3 = norm_rand(0, std);
-	accel.x += t3; 
-	accel.y += norm_rand(0, std);
-	accel.z += norm_rand(0, std);
-
-	//printf("%d : %lf %lf %lf (%lf : %lf : %lf)\n", id, t1, t2, t3, std, viscosity, T);
-
+		double variance = 2 * mass * viscosity * BOLTZMANN_K * Tr / dt;
+		// units are amu * ps^-1 * amu A^2 ps^-2 / K * K / ps
+		//    = amu^2 * ps^-4 * A^2
+		
+		double std = sqrtl(variance);
+		// so the units of the std are amu A ps^-2
+		
+		t3 = norm_rand(0, std);
+		accel.x += t3; 
+		accel.y += norm_rand(0, std);
+		accel.z += norm_rand(0, std);
+	}
 	m->as[id].vel.x += dt * accel.x / mass;
 	m->as[id].vel.y += dt * accel.y / mass;
 	m->as[id].vel.z += dt * accel.z / mass;
+	
+	if (m->thermostat == ANDERSEN) {
+		// with Andersen thermostat, the probability of a collision with bath is given as
+		//  P(t) = v exp(-v t)
+		// Giving a proportion of molecules which will have collided in that time. 
+		// This proportion of atoms are then assigned random velocity based on the temperature.
+		// Though v in this case is rate of collision, we reuse 'viscosity'.
+		int k = 0;
+		for (k = 0; k < m->n_atoms; k++)
+			m->as[k].andersen_f = 0;
+		double P = 1000. * viscosity * expl(-viscosity * dt);
+		int Pr = (int) P;
+		int ran = (rand()%1000);
+		//printf("%d, %d -> %s\n", Pr, ran, (ran < Pr)?"yes":"no");
+		if (ran < Pr) {
+			//printf("%d, %d -> ", Pr, ran);
+			set_temp_vel(m, id, T);
+		}
+		
+		/*while (n_vel > 0) {
+			k = (rand()%m->n_atoms);
+			if (m->as[k].andersen_f == 1)
+				continue;
+			n_vel--;
+			m->as[k].andersen_f = 1;
+			printf("%d %d\n", k, n_vel);
+			set_temp_vel(m, k, T);
+		}*/
+		
+	}
 	// amu A ps^-2 * ps / amu = A ps^-1
 	return;
 }
@@ -607,6 +663,8 @@ void bond_xyz(struct Molecule *m, float bl) {
 	}
 	return;
 }
+
+
 
 /* read_xyz()
  *  Reads xyz file *filename, and generates atomic positions and puts
@@ -771,22 +829,7 @@ void minimize(struct Molecule *m, double dn, double dt, int steps, int output_st
 	propagate(m, dn, dt, steps, output_step, fn, 0, 0, MINIMIZE);
 }
 
-void set_temp_vel(struct Molecule *m, int atomid, double temp) {
-	struct Vector v;
 
-	v.x = (rand()%100)/100.;
-	v.y = (rand()%100)/100.;
-	v.z = (rand()%100)/100.;
-	normalise(&v);
-
-	double mass = m->model->vdwM[m->as[atomid].type];
-
-	double temp_factor = sqrtl(2 * BOLTZMANN_K * temp / mass);
-
-	m->as[atomid].vel.x = v.x * temp_factor;
-	m->as[atomid].vel.y = v.y * temp_factor;
-	m->as[atomid].vel.z = v.z * temp_factor;
-}
 
 void heat(struct Molecule *m, double temp) {
 	int i;
@@ -883,6 +926,9 @@ int run_script(char *filename, struct Molecule *m) {
 				printf("No model assigned\n");
 			else
 				printf("Energy: %f kcal/mol\n", calc_energy(m, 0, &zero));
+		} else if (strcmp(command, "temperature") == 0) {
+			printf("Temperature: %f K\n", calc_temperature(m));
+			
 		} else if (strcmp(command, "minimize") == 0) {
 			if (sscanf(line + c, "%lf %lf %d %d %s", &dn, &dt, &steps, &output_step, command) != 5) {
 				printf("Error reading script\n%s", line);
@@ -898,6 +944,17 @@ int run_script(char *filename, struct Molecule *m) {
 				break;
 			}
 			heat(m, temp);
+		} else if (strcmp(command, "thermostat") == 0) {
+			if (sscanf(line + c, "%s", command) != 1) {
+				printf("Error reading thermostat\n");
+				break;
+			}
+			if (strcmp(command, "LANGEVIN") == 0) {
+				printf("Please note the Langevin thermostat is broken.\n");
+				m->thermostat = LANGEVIN;
+			} else if (strcmp(command, "ANDERSEN") == 0) {
+				m->thermostat = ANDERSEN;
+			}
 		} else if (strcmp(command, "prod") == 0) {
 			if (sscanf(line + c, "%lf %lf %lf %lf %d %d %s", &dn, &dt, &temp, &viscosity, &steps, &output_step, command) != 7) {
 				printf("Error reading script\n%s", line);
@@ -905,6 +962,14 @@ int run_script(char *filename, struct Molecule *m) {
 			}
 			if (steps < 0)
 				break;
+			if (m->model == NULL) {
+				printf("No model assigned.\n");
+				break;
+			} 
+			if (m->thermostat == -1) {
+				printf("No thermostat assigned.\n");
+				break;
+			}
 			production(m, dn, dt, steps, output_step, command, temp, viscosity);
 		}
 	}
@@ -924,7 +989,7 @@ int main(int argc, char *argv[]) {
 	struct Molecule mol;
 	mol.n_atoms = 0;
 	mol.model = NULL;
-	
+	mol.thermostat = -1;
 	
 	char command[255];
 	int n, A, B;

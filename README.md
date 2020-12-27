@@ -37,5 +37,9 @@ The user interface is as in `ThatPerson/Conformation`. In scripting mode (eg `./
 * `minimize <dn> <dt> <steps> <outputsteps> <filename>` Runs minimization (e.g. velocity deleted each cycle, so system bond lengths and angles are relaxed) for `<steps>`, writing out the system to `<filename>` every `<outputsteps>`. Differentiation of the forcefield is done using `<dn>`, where this is a distance in Angstroms (generally ~0.01). Each step is `<dt>` picoseconds (generally 0.01).
 * `heat <temperature>` Randomly assigns motion to all atoms dependent on temperature *see warning*
 * `prod <dn> <dt> <temperature> <viscosity> <step> <outputstep> <filename>` Runs production MD. All inputs are as in `minimize`, except for `<temperature>` (*see warning*) and `<viscosity>` (*see warning*).
+* `temperature` Outputs current system temperature
+* `thermostat <thermostat>` `<thermostat>` can either be ANDERSEN or LANGEVIN. LANGEVIN is currently broken, see warning. With ANDERSEN temperature control seems okay but can explode. In ANDERSEN mode, the `v` parameter is taken from `viscosity`.
+
 
 *warning*: The temperature implementation at the moment is just plain broken. The units are not consistent and I need to fix this. For now, a temperature of `0.01` and viscosity of `0.1` seem to give okay results, but I'm not sure what the units of these are.
+
