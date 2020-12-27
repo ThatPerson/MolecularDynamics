@@ -564,9 +564,9 @@ double atomic_to_kcal(double v) {
 void set_temp_vel(struct Molecule *m, int atomid, double temp) {
 	struct Vector v;
 
-	v.x = ((rand()%100 - 50)/100.);
-	v.y = ((rand()%100 - 50)/100.);
-	v.z = ((rand()%100 - 50)/100.);
+	v.x = ((rand()%100 - 49)/100.);
+	v.y = ((rand()%100 - 49)/100.);
+	v.z = ((rand()%100 - 49)/100.);
 	if (v.x == 0 && v.y == 0 && v.z == 0)
 		v.x = 1;
 	normalise(&v);
