@@ -424,6 +424,10 @@ double dot(struct Vector *a, struct Vector *b) {
 	return (a->x * b->x) + (a->y * b->y) + (a->z * b->z);
 }
 
+void print_vector(struct Vector *v) {
+	printf("(%f, %f, %f)\n", v->x, v->y, v->z);
+}
+
 double calc_phi(struct Vector *a, struct Vector *b, struct Vector *c) {
 	// calculates the ABC angle.
 	struct Vector ab; 
@@ -432,7 +436,15 @@ double calc_phi(struct Vector *a, struct Vector *b, struct Vector *c) {
 	sub_vector(c, b, &bc);
 	normalise(&ab);
 	normalise(&bc);
+
 	double v = dot(&ab, &bc);
+
+	
+	// because v is a double it can be -1.0000001
+	if (v > 1)
+		v = 1;
+	if (v < -1)
+		v = -1;
 	return acos(v);
 }
 
@@ -445,6 +457,10 @@ double calc_omega(struct Vector *a, struct Vector *b, struct Vector *c, struct V
 	normalise(&ab);
 	normalise(&cd);
 	double v = dot(&ab, &cd);
+	if (v > 1)
+		v = 1;
+	if (v < -1)
+		v = -1;
 	return acos(v);
 }
 
@@ -489,7 +505,6 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 			divl = calc_distance(&apos, &bpos) - l0;
 			energy += 71.94 * K * powl(divl, 2.) * (1 - 2.55 * divl + 2.55 * (7/12.) * powl(divl, 2.));
 			//printf("\tmodel->bl[%d][%d] = %f\n", a->type, b->type, l0);
-			//printf("%d:%d %f kcal/mol\n", a->type, b->type, energy);
 			for (k = j+1; k < a->n_bonds; k++) {
 				// Eangle
 				h_bonds = 0;
@@ -521,6 +536,7 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 					energy += ((V[0] / 2.) * (1 + cos(omega)));
 					energy += ((V[1] / 2.) * (1 - cos(2 * omega)));
 					energy += ((V[2] / 2.) * (1 + cos(3 * omega)));
+
 				}
 			}
 		}
@@ -546,6 +562,7 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 			q = m->model->charge[a->type];
 			Q = m->model->charge[b->type];
 			energy += COULOMB_CONSTANT * q * Q / r;
+
 		}
 	}
 	return energy;
@@ -623,6 +640,7 @@ void process_atom(int id, struct Molecule *m, double dn, double dt, double visco
 	e2 = kcal_to_atomic(calc_energy(m, id, &o2));
 	e_grad.z = (e1 - e2) / (2 * dn);
 
+
 	double mass = m->model->vdwM[m->as[id].type];
 
 	struct Vector accel;
@@ -656,6 +674,8 @@ void process_atom(int id, struct Molecule *m, double dn, double dt, double visco
 	m->as[id].vel.x += dt * accel.x / mass;
 	m->as[id].vel.y += dt * accel.y / mass;
 	m->as[id].vel.z += dt * accel.z / mass;
+	
+
 	
 	if (m->thermostat == ANDERSEN) {
 		// with Andersen thermostat, the probability of a collision with bath is given as
@@ -865,7 +885,8 @@ void propagate(struct Molecule *m, double dn, double dt, int steps, int output_s
 	for (i = 0; i < steps; i++) {
 		#pragma omp parallel for
 		for (k = 0; k < m->n_atoms; k++) {
-			process_atom(k, m, dn, dt, viscosity, temp);
+			if (mode != HEAT)
+				process_atom(k, m, dn, dt, viscosity, temp);
 			add_vector_sc(&(m->as[k].v), &(m->as[k].vel), dt);
 			if (mode == MINIMIZE)
 				set_vector(&(m->as[k].vel), 0, 0, 0);
@@ -881,16 +902,23 @@ void minimize(struct Molecule *m, double dn, double dt, int steps, int output_st
 }
 
 
-
-void heat(struct Molecule *m, double temp) {
-	int i;
-	for (i = 0; i < m->n_atoms; i++) {
-		set_temp_vel(m, i, temp);
-	}
-	return;
+void iterate_once(struct Molecule *m, double dn, double dt, char fn[500], double temp, double viscosity) {
+	propagate(m, dn, dt, 1, 1, fn, temp, viscosity, HEAT);
 }
 
 
+void heat(struct Molecule *m, double temp, double temp_step, int steps, double dn, double dt, double dnM, double dnT, double viscosity, char fn[500]) {
+	int i;
+	double T = 0;
+	for (T = 0; T < temp + temp_step; T += temp_step) {
+		for (i = 0; i < m->n_atoms; i++) {
+			set_temp_vel(m, i, T);
+			iterate_once(m, dn, dt, fn, T, viscosity);
+			minimize(m, dnM, dnT, steps, 100, fn);
+		}
+	}
+	return;
+}
 
 void production(struct Molecule *m, double dn, double dt, int steps, int output_step, char fn[500], double temp, double viscosity) {
 	propagate(m, dn, dt, steps, output_step, fn, temp, viscosity, PROD);
@@ -929,7 +957,7 @@ int run_script(char *filename, struct Molecule *m) {
 	char command[255];
 	int c;
 	struct Vector zero;
-	double dn, dt, temp, viscosity;
+	double dn, dt, temp, viscosity, temp_step, dnM, dnT;
 	unsigned int i;
 	int steps, output_step;
 	zero.x = 0; zero.y = 0; zero.z = 0;
@@ -991,11 +1019,26 @@ int run_script(char *filename, struct Molecule *m) {
 
 			minimize(m, dn, dt, steps, output_step, command);
 		} else if (strcmp(command, "heat") == 0) {
-			if (sscanf(line + c, "%lf", &temp) != 1) {
+			if (sscanf(line + c, "%lf %lf %d %lf %lf %lf %lf %lf %s", &temp, &temp_step, &steps, &dn, &dt, &dnM, &dnT, &viscosity, command) != 9) {
 				printf("Error reading script\n%s", line);
 				break;
 			}
-			heat(m, temp);
+			heat(m, temp, temp_step, steps, dn, dt, dnM, dnT, viscosity, command);
+		} else if (strcmp(command, "iterate") == 0) {
+			if (sscanf(line + c, "%lf %lf %lf %lf %s", &dn, &dt, &temp, &viscosity, command) != 5) {
+				printf("Error reading script\n%s", line);
+				break;
+			}
+			if (m->model == NULL) {
+				printf("No model assigned.\n");
+				break;
+			} 
+			if (m->thermostat == -1) {
+				printf("No thermostat assigned.\n");
+				break;
+			}
+			
+			iterate_once(m, dn, dt, command, temp, viscosity);
 		} else if (strcmp(command, "thermostat") == 0) {
 			if (sscanf(line + c, "%s", command) != 1) {
 				printf("Error reading thermostat\n");
