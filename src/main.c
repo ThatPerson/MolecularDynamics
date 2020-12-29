@@ -10,11 +10,13 @@
 #define ATOM_H 0
 #define ATOM_C 1
 #define ATOM_O 2
-#define ATOM_UNKNOWN 3
-#define ATOM_TYPES 4
+#define ATOM_N 3
+#define ATOM_UNKNOWN 4
+#define ATOM_TYPES 5
 
 #define MOD_MM3 1
 #define MOD_TIP3P 2
+#define MOD_GAFF 3
 
 #define INITIAL_BONDS 5 // Number of bonds per atom possible.
 						// If you've got some weird compound may need to increase
@@ -41,6 +43,9 @@
 #define LANGEVIN 0
 #define ANDERSEN 1
 
+#define SP1  0
+#define SP2 1
+#define SP3 2
 
 
 struct Vector {
@@ -48,15 +53,12 @@ struct Vector {
 };
 
 struct Model {
-	double bl[ATOM_TYPES][ATOM_TYPES];
-	double bb[ATOM_TYPES][ATOM_TYPES][ATOM_TYPES][3];
-	double bt[ATOM_TYPES][ATOM_TYPES][ATOM_TYPES][ATOM_TYPES][3];
-	double blK[ATOM_TYPES][ATOM_TYPES];
-	double bbK[ATOM_TYPES][ATOM_TYPES][ATOM_TYPES];
-	double vdwE[ATOM_TYPES][ATOM_TYPES];
-	double vdwR[ATOM_TYPES];
-	double vdwM[ATOM_TYPES];
+	double eq_bond_length[ATOM_TYPES][ATOM_TYPES];
+	double eq_bond_K[ATOM_TYPES][ATOM_TYPES];
+	double angle_C[ATOM_TYPES];
+	double angle_Z[ATOM_TYPES];
 	double charge[ATOM_TYPES];
+	double vdwM[ATOM_TYPES];
 };
 
 struct Atom {
@@ -68,6 +70,7 @@ struct Atom {
 	struct Atom ** bonds;
 	char name[20];
 	int type;
+	int hybridization;
 	int i;
 	int andersen_f;
 };
@@ -111,106 +114,67 @@ double norm_rand(double mean, double std) {
 
 void setup_model(struct Model * m, int model) {
 	int i, k, l, p;
+
 	for (i = 0; i < ATOM_TYPES; i++) {
-		//m->vdwE[i] = 0;
-		m->vdwR[i] = 0;
-		m->vdwM[i] = 0;
 		for (k = 0; k < ATOM_TYPES; k++) {
-			m->bl[i][k] = 0;
-			m->blK[i][k] = 0;
-			m->vdwE[i][k] = 0;
-			for (l = 0; l < ATOM_TYPES; l++) {
-				m->bb[i][k][l][0] = 0;
-				m->bb[i][k][l][1] = 0;
-				m->bb[i][k][l][2] = 0;
-				m->bbK[i][k][l] = 0;
-				for (p = 0; p < ATOM_TYPES; p++) {
-					m->bt[i][k][l][p][0] = 0;
-					m->bt[i][k][l][p][1] = 0;
-					m->bt[i][k][l][p][2] = 0;
-				}
-			}
+			m->eq_bond_length[i][k] = 0;
+			m->eq_bond_K[i][k] = 0;
 		}
+		m->charge[i] = 0;
+		m->angle_C[i] = 0;
+		m->angle_Z[i] = 0;
+		m->vdwM[i] = 0;
 	}
-	if (model == MOD_MM3) {
-		printf("m->bl is at %d\n", m->bl);
-		m->bl[ATOM_C][ATOM_C] = 1.5247;
-		m->bl[ATOM_C][ATOM_H] = 1.112;
-		m->bl[ATOM_H][ATOM_C] = 1.112;
-		m->blK[ATOM_C][ATOM_C] = 4.49;
-		m->blK[ATOM_C][ATOM_H] = 4.74;
-		m->blK[ATOM_H][ATOM_C] = 4.74;
-		m->bb[ATOM_C][ATOM_C][ATOM_C][0] = 109.5 * (M_PI / 180.);
-		m->bb[ATOM_C][ATOM_C][ATOM_H][0] = 109.8 * (M_PI / 180.);
-		m->bb[ATOM_H][ATOM_C][ATOM_C][0] = 109.8 * (M_PI / 180.);
-		m->bb[ATOM_H][ATOM_C][ATOM_H][0] = 107.6 * (M_PI / 180.);
 
-		m->bb[ATOM_C][ATOM_C][ATOM_C][1] = 110.2 * (M_PI / 180.);
-		m->bb[ATOM_C][ATOM_C][ATOM_H][1] = 109.3 * (M_PI / 180.);
-		m->bb[ATOM_H][ATOM_C][ATOM_C][1] = 109.3 * (M_PI / 180.);
-		m->bb[ATOM_H][ATOM_C][ATOM_H][1] = 107.8 * (M_PI / 180.);
-
-		m->bb[ATOM_C][ATOM_C][ATOM_C][2] = 111.0 * (M_PI / 180.);
-		m->bb[ATOM_C][ATOM_C][ATOM_H][2] = 110.7 * (M_PI / 180.);
-		m->bb[ATOM_H][ATOM_C][ATOM_C][2] = 110.7 * (M_PI / 180.);
-		m->bb[ATOM_H][ATOM_C][ATOM_H][2] = 109.5 * (M_PI / 180.);
-		m->bbK[ATOM_C][ATOM_C][ATOM_C] = 0.67;
-		m->bbK[ATOM_C][ATOM_C][ATOM_H] = 0.59;
-		m->bbK[ATOM_H][ATOM_C][ATOM_C] = 0.59;
-		m->bbK[ATOM_H][ATOM_C][ATOM_H] = 0.55;
-
-		m->bt[ATOM_H][ATOM_C][ATOM_C][ATOM_H][0] = 0;
-		m->bt[ATOM_H][ATOM_C][ATOM_C][ATOM_H][1] = 0;
-		m->bt[ATOM_H][ATOM_C][ATOM_C][ATOM_H][2] = 0.238;
-
-		m->bt[ATOM_H][ATOM_C][ATOM_C][ATOM_C][0] = 0;
-		m->bt[ATOM_H][ATOM_C][ATOM_C][ATOM_C][1] = 0;
-		m->bt[ATOM_H][ATOM_C][ATOM_C][ATOM_C][2] = 0.280;
-
-		m->bt[ATOM_C][ATOM_C][ATOM_C][ATOM_H][0] = 0;
-		m->bt[ATOM_C][ATOM_C][ATOM_C][ATOM_H][1] = 0;
-		m->bt[ATOM_C][ATOM_C][ATOM_C][ATOM_H][2] = 0.280;
-
-		m->bt[ATOM_C][ATOM_C][ATOM_C][ATOM_C][0] = 0.185;
-		m->bt[ATOM_C][ATOM_C][ATOM_C][ATOM_C][1] = 0.170;
-		m->bt[ATOM_C][ATOM_C][ATOM_C][ATOM_C][2] = 0.520;
-
-		m->vdwE[ATOM_C][ATOM_C] = 0.027;
-		m->vdwR[ATOM_C] = .204;
-		m->vdwM[ATOM_C] = 12.0;
-
-		m->vdwE[ATOM_H][ATOM_H] = 0.020;
-		m->vdwR[ATOM_H] = 1.62;
+	if (model == MOD_GAFF) {
+		m->eq_bond_length[ATOM_H][ATOM_H] = 0.738;
+		m->eq_bond_K[ATOM_H][ATOM_H] = 4.661;
+		
+		m->eq_bond_length[ATOM_H][ATOM_C] = 1.090;
+		m->eq_bond_K[ATOM_H][ATOM_C] = 6.217;
+		m->eq_bond_length[ATOM_C][ATOM_H] = 1.090;
+		m->eq_bond_K[ATOM_C][ATOM_H] = 6.217;
+		
+		m->eq_bond_length[ATOM_O][ATOM_H] = 0.960;
+		m->eq_bond_K[ATOM_O][ATOM_H] = 5.794;
+		m->eq_bond_length[ATOM_H][ATOM_O] = 0.960;
+		m->eq_bond_K[ATOM_H][ATOM_O] = 5.794;
+		
+		m->eq_bond_length[ATOM_N][ATOM_H] = 1.010;
+		m->eq_bond_K[ATOM_N][ATOM_H] = 6.057;
+		m->eq_bond_length[ATOM_H][ATOM_N] = 1.010;
+		m->eq_bond_K[ATOM_H][ATOM_N] = 6.057;
+		
+		m->eq_bond_length[ATOM_C][ATOM_O] = 1.440;
+		m->eq_bond_K[ATOM_C][ATOM_O] = 7.347;
+		m->eq_bond_length[ATOM_O][ATOM_C] = 1.440;
+		m->eq_bond_K[ATOM_O][ATOM_C] = 7.347;
+		
+		m->eq_bond_length[ATOM_C][ATOM_N] = 1.470;
+		m->eq_bond_K[ATOM_C][ATOM_N] = 7.504;
+		m->eq_bond_length[ATOM_N][ATOM_C] = 1.470;
+		m->eq_bond_K[ATOM_N][ATOM_C] = 7.504;
+		
+		m->eq_bond_length[ATOM_C][ATOM_C] = 1.526;
+		m->eq_bond_K[ATOM_C][ATOM_C] = 7.643;
+		
+		m->angle_C[ATOM_C] = 1.339;
+		m->angle_C[ATOM_N] = 1.300;
+		m->angle_C[ATOM_O] = 1.249;
+		
+		m->angle_Z[ATOM_C] = 1.183;
+		m->angle_Z[ATOM_N] = 1.212;
+		m->angle_Z[ATOM_O] = 1.219;
+		m->angle_Z[ATOM_H] = 0.784;
+		
+		m->vdwM[ATOM_C] = 12.;
 		m->vdwM[ATOM_H] = 1.008;
-		
-		m->vdwE[ATOM_C][ATOM_H] = 0.020;
-		m->vdwE[ATOM_H][ATOM_C] = 0.020; //?
-		
-		m->charge[ATOM_H] = 0;
-		m->charge[ATOM_C] = 0;
-
-	} else if (model == MOD_TIP3P) {
-		m->vdwM[ATOM_H] = 1.008;
-		m->charge[ATOM_H] = 0.417;
-		m->vdwR[ATOM_H] = 0.2;
-		m->vdwM[ATOM_O] = 15.9994;
-		m->charge[ATOM_O] = -0.834;
-		m->vdwR[ATOM_O] = 1.5753;
-
-		m->vdwE[ATOM_H][ATOM_H] = 0.0460;
-		m->vdwE[ATOM_O][ATOM_O] = 0.1521;
-		m->vdwE[ATOM_O][ATOM_H] = 0.0836;
-		m->vdwE[ATOM_H][ATOM_O] = 0.0836;
-		
-		m->bl[ATOM_H][ATOM_O] = 0.9572;
-		m->bl[ATOM_O][ATOM_H] = 0.9572;
-		m->blK[ATOM_H][ATOM_O] = 450/4184.;
-		m->blK[ATOM_O][ATOM_H] = 450/4184.;
-		m->bb[ATOM_H][ATOM_O][ATOM_H][0] = 104.52 * (M_PI / 180.);
-		m->bbK[ATOM_H][ATOM_O][ATOM_H] = 55 / 4184.;
+		m->vdwM[ATOM_O] = 16.;
+		m->vdwM[ATOM_N] = 14.;
 	}
 	return;
 }
+
 
 /* reset_check()
  *  Resets all .check values to be FALSE. Should be run before _any_
@@ -472,6 +436,36 @@ double calc_distance(struct Vector *a, struct Vector *b) {
 	return sqrtl(su);
 }
 
+
+double bond_energy(struct Atom *a, struct Atom *b, struct Vector *apos, struct Vector *bpos, struct Model *m) {
+	double req = m->eq_bond_length[a->type][b->type];
+	double r = calc_distance(apos, bpos);
+	double K = m->eq_bond_K[a->type][b->type];
+	return K * powl(r - req, 2.);
+}
+
+double angle_energy(struct Atom *a, struct Atom *b, struct Atom *c, struct Vector *apos, struct Vector *bpos, struct Vector *cpos, struct Model *m) {
+	// a-b-c
+	double phi0;
+	switch (b->hybridization) {
+		case SP1: phi0 = 180. * (M_PI / 180.);break;
+		case SP2: phi0 = 120. * (M_PI / 180.);break;
+		case SP3: phi0 = 104. * (M_PI / 180.); break;
+		default: phi0 = 104. * (M_PI / 180.); break;
+	}
+	double phi = calc_phi(apos, bpos, cpos);
+	double rijeq = m->eq_bond_length[a->type][b->type];
+	double rjkeq = m->eq_bond_length[b->type][c->type];
+	
+	double D = powl(rijeq - rjkeq, 2.) * powl(rijeq + rjkeq, -2.);
+	double Kijk = 143.9 * m->angle_Z[a->type] * m->angle_C[b->type] * m->angle_Z[c->type];
+	Kijk *= powl(rijeq + rjkeq, -1.);
+	Kijk *= powl(phi0, -2.);
+	Kijk *= expl(-2 * D);
+	return Kijk * powl(phi - phi0, 2.);
+}
+
+
 double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) {
 	unsigned int i,j,k,l;
 	struct Atom *a,*b,*c,*d;
@@ -486,56 +480,20 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 	for (i = 0; i < m->n_atoms; i++) {
 		a = &(m->as[i]);
 		add_vector(&(a->v), (i == atom_offset)?offset:&(zero), &apos);
-		
-		/*printf("Atom %d\n", i);
-		for (k = 0; k < 2; k++) {
-			for (l = 0; l < 2; l++) {
-				printf("model->bl[%d][%d] = %f\n", k, l, m->model->bl[k][l]);
-			}
-		}*/
-		
 		for (j = 0; j < a->n_bonds; j++) {
 			// Ebond
 			b = a->bonds[j];
 			add_vector(&(b->v), (b->i == atom_offset)?offset:&(zero), &bpos);
-			K = m->model->blK[a->type][b->type];
-
-			l0 = m->model->bl[a->type][b->type];
-			//printf("%f :: %d\n", l0, m->model->bl[a->type][b->type]);
-			divl = calc_distance(&apos, &bpos) - l0;
-			energy += 71.94 * K * powl(divl, 2.) * (1 - 2.55 * divl + 2.55 * (7/12.) * powl(divl, 2.));
-			//printf("\tmodel->bl[%d][%d] = %f\n", a->type, b->type, l0);
+			energy += bond_energy(a, b, &apos, &bpos, m->model) / 2.; // divided by 2 as will be A-B and B-A
 			for (k = j+1; k < a->n_bonds; k++) {
 				// Eangle
-				h_bonds = 0;
-				for (l = 0; l < a->n_bonds; l++) {
-					if (l == k || l == j)
-						continue;
-					h_bonds += (a->bonds[l]->type == ATOM_H)?1:0;
-				}
-				if (h_bonds > 2)
-					h_bonds = 2;
 				c = a->bonds[k];
 				add_vector(&(c->v), (c->i == atom_offset)?offset:&(zero), &cpos);
-				K = m->model->bbK[b->type][a->type][c->type];
-				phi0 = m->model->bb[b->type][a->type][c->type][h_bonds];
-				phi = calc_phi(&bpos, &apos, &cpos);
-				divphi = phi - phi0;
-				multi = 1 + 0.014 * divphi + 5.6 * powl(10, -5.) * powl(divphi, 2.);
-				multi += -7*powl(10, -7.)*powl(divphi, 3.) + 9*powl(10, -10.)*powl(divphi, 4.);
-				energy += 0.021914 * K * powl(divphi, 2.) * multi;
-
+				energy += angle_energy(a, b, c, &apos, &bpos, &cpos, m->model) / 2.; // ditto
 				for (l = 0; l < c->n_bonds; l++) {
 					// Edihedral
-					d = c->bonds[l];
-					add_vector(&(d->v), (d->i == atom_offset)?offset:&(zero), &dpos);
-					omega = calc_omega(&bpos, &apos, &cpos, &dpos);
-					V[0] = m->model->bt[b->type][a->type][c->type][d->type][0];
-					V[1] = m->model->bt[b->type][a->type][c->type][d->type][1];
-					V[2] = m->model->bt[b->type][a->type][c->type][d->type][2];
-					energy += ((V[0] / 2.) * (1 + cos(omega)));
-					energy += ((V[1] / 2.) * (1 - cos(2 * omega)));
-					energy += ((V[2] / 2.) * (1 + cos(3 * omega)));
+				
+					// tbd
 
 				}
 			}
@@ -545,20 +503,14 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 			if (i == j)
 				continue;
 			// Evdw
+			// vdw tbd.
+
 			b = &(m->as[j]);
 			add_vector(&(b->v), (b->i == atom_offset)?offset:&(zero), &bpos);
-			l0 = m->model->vdwR[a->type] + m->model->vdwR[b->type];
-			r = calc_distance(&apos, &bpos);
-			if (r == 0)
-				continue;
-			vdw = -2.25 * powl(l0 / r, 6.);
-			vdw += 1.84 * powl(10, 5.) * expl(-12 *(r/l0));
-			energy += m->model->vdwE[a->type][b->type] * vdw;
-
-
 			// Eelectrostatic
 			// Ees = ke q Q / r
 			double q, Q;
+			r = calc_distance(&apos, &bpos);
 			q = m->model->charge[a->type];
 			Q = m->model->charge[b->type];
 			energy += COULOMB_CONSTANT * q * Q / r;
@@ -993,13 +945,26 @@ int run_script(char *filename, struct Molecule *m) {
 				printf("Error reading script\n%s", line);
 				break;
 			}
-			if (strcmp(command, "MM3") == 0)
-				setup_model(&mod, MOD_MM3);
-			else if (strcmp(command, "TIP3P") == 0)
-				setup_model(&mod, MOD_TIP3P);
+			if (strcmp(command, "GAFF") == 0)
+				setup_model(&mod, MOD_GAFF);
 			m->model = &mod;
 			
- 
+ 		} else if (strcmp(command, "hybridize") == 0) {
+ 			//printf("%s\n", command);
+ 			if (sscanf(line+c, "%d %s", &steps, command) != 2) {
+ 				printf("Error reading script\n%s", line);
+ 				break;
+ 			}
+ 			//printf("%d steps\n", steps);
+ 			if (strcmp(command, "SP") == 0)
+ 				m->as[steps].hybridization = SP1;
+ 			else if (strcmp(command, "SP2") == 0)
+ 				m->as[steps].hybridization = SP2;
+ 			else if (strcmp(command, "SP3") == 0)
+ 				m->as[steps].hybridization = SP3;
+ 			else
+ 				printf("Hybridization not recognised %s\n", command);
+ 				
 			
 		} else if (strcmp(command, "energy") == 0) {
 			if (m->model == NULL)
