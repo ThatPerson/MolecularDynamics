@@ -59,6 +59,12 @@ struct Model {
 	double angle_Z[ATOM_TYPES];
 	double charge[ATOM_TYPES];
 	double vdwM[ATOM_TYPES];
+	double polarizability[ATOM_TYPES];
+	double dihedral_pref[ATOM_TYPES][ATOM_TYPES];
+	double dihedral_n[ATOM_TYPES][ATOM_TYPES];
+	double dihedral_gamma[ATOM_TYPES][ATOM_TYPES];
+	double vdwR[ATOM_TYPES];
+	double vdw_EDEP[ATOM_TYPES];
 };
 
 struct Atom {
@@ -119,11 +125,17 @@ void setup_model(struct Model * m, int model) {
 		for (k = 0; k < ATOM_TYPES; k++) {
 			m->eq_bond_length[i][k] = 0;
 			m->eq_bond_K[i][k] = 0;
+			m->dihedral_pref[i][k] = 0;
+			m->dihedral_n[i][k] = 0;
+			m->dihedral_gamma[i][k] = 0;
 		}
 		m->charge[i] = 0;
 		m->angle_C[i] = 0;
 		m->angle_Z[i] = 0;
 		m->vdwM[i] = 0;
+		m->polarizability[i] = 0;
+		m->vdwR[i] = 0;
+		m->vdw_EDEP[i] = 0;
 	}
 
 	if (model == MOD_GAFF) {
@@ -171,6 +183,39 @@ void setup_model(struct Model * m, int model) {
 		m->vdwM[ATOM_H] = 1.008;
 		m->vdwM[ATOM_O] = 16.;
 		m->vdwM[ATOM_N] = 14.;
+		
+		m->polarizability[ATOM_C] = 0.360;
+		m->polarizability[ATOM_N] = 0.530;
+		m->polarizability[ATOM_H] = 0.135;
+		m->polarizability[ATOM_O] = 0.465;
+		
+		m->dihedral_pref[ATOM_C][ATOM_C] = 1.2/4.;
+		m->dihedral_pref[ATOM_C][ATOM_N] = 10./4.;
+		m->dihedral_pref[ATOM_N][ATOM_C] = 10./4.;
+		m->dihedral_pref[ATOM_C][ATOM_O] = 4.6/4.;
+		m->dihedral_pref[ATOM_O][ATOM_C] = 4.6/4.;
+		
+		m->dihedral_gamma[ATOM_C][ATOM_C] = 180. * (M_PI / 180.);
+		m->dihedral_gamma[ATOM_C][ATOM_N] = 180. * (M_PI / 180.);
+		m->dihedral_gamma[ATOM_N][ATOM_C] = 180. * (M_PI / 180.);
+		m->dihedral_gamma[ATOM_C][ATOM_O] = 180. * (M_PI / 180.);
+		m->dihedral_gamma[ATOM_O][ATOM_C] = 180. * (M_PI / 180.);
+		
+		m->dihedral_n[ATOM_C][ATOM_C] = 2.;
+		m->dihedral_n[ATOM_C][ATOM_N] = 2.;
+		m->dihedral_n[ATOM_N][ATOM_C] = 2.;
+		m->dihedral_n[ATOM_C][ATOM_O] = 2.;
+		m->dihedral_n[ATOM_O][ATOM_C] = 2.;
+		
+		m->vdwR[ATOM_H] = 1.3870;
+		m->vdwR[ATOM_C] = 1.9080;
+		m->vdwR[ATOM_O] = 1.6612;
+		m->vdwR[ATOM_N] = 1.8240;
+		
+		m->vdw_EDEP[ATOM_H] = 0.0157;
+		m->vdw_EDEP[ATOM_C] = 0.0860;
+		m->vdw_EDEP[ATOM_N] = 0.1700;
+		m->vdw_EDEP[ATOM_O] = 0.2100;
 	}
 	return;
 }
@@ -465,6 +510,27 @@ double angle_energy(struct Atom *a, struct Atom *b, struct Atom *c, struct Vecto
 	return Kijk * powl(phi - phi0, 2.);
 }
 
+double vdw_energy(struct Atom *a, struct Atom *b, struct Vector *apos, struct Vector *bpos, struct Model *m) {
+	double EDEP = sqrtl(m->vdw_EDEP[a->type] * m->vdw_EDEP[b->type]);
+	double sigma = sqrtl(m->vdwR[a->type] * m->vdwR[b->type]);
+	double distance = calc_distance(apos, bpos);
+	double term = sigma / distance;
+	double term6 = term * term * term * term * term * term;
+	double term12 = term6 * term6;
+	
+	return EDEP * (term12 - 2 * term6);
+}
+
+double dihedral_energy(struct Atom *a, struct Atom *b, struct Atom *c, struct Atom *d, struct Vector *apos, struct Vector *bpos, struct Vector *cpos, struct Vector *dpos, struct Model *m) {
+	double omega = calc_omega(apos, bpos, cpos, dpos);	
+	
+	// energy = pref * (1 + cos(n omega - gamma))
+	double energy = m->dihedral_n[b->type][c->type] * omega - m->dihedral_gamma[b->type][c->type];
+	energy = cos(energy);
+	energy += 1;
+	energy *= m->dihedral_pref[b->type][c->type];
+	return energy;
+}
 
 double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) {
 	unsigned int i,j,k,l;
@@ -492,21 +558,31 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 				energy += angle_energy(a, b, c, &apos, &bpos, &cpos, m->model) / 2.; // ditto
 				for (l = 0; l < c->n_bonds; l++) {
 					// Edihedral
-				
-					// tbd
+					d = c->bonds[l];
+					add_vector(&(d->v), (d->i == atom_offset)?offset:&(zero), &dpos);
+					energy += dihedral_energy(a, b, c, d, &apos, &bpos, &cpos, &dpos, m->model)/2.; // ditto
+
+
+
 
 				}
 			}
 		}
-		for (j = 0; j < m->n_atoms; j++) {
+		for (j = i+1; j < m->n_atoms; j++) {
 		
 			if (i == j)
 				continue;
-			// Evdw
-			// vdw tbd.
-
+		
 			b = &(m->as[j]);
 			add_vector(&(b->v), (b->i == atom_offset)?offset:&(zero), &bpos);
+			
+			
+			//Evdw
+			
+			energy += vdw_energy(a, b, &apos, &bpos, m->model);
+			
+			
+			
 			// Eelectrostatic
 			// Ees = ke q Q / r
 			double q, Q;
