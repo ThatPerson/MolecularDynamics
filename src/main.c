@@ -555,12 +555,12 @@ double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) 
 				// Eangle
 				c = a->bonds[k];
 				add_vector(&(c->v), (c->i == atom_offset)?offset:&(zero), &cpos);
-				energy += angle_energy(a, b, c, &apos, &bpos, &cpos, m->model) / 2.; // ditto
+				energy += angle_energy(b, a, c, &bpos, &apos, &cpos, m->model); // not divided as we only do this path once.
 				for (l = 0; l < c->n_bonds; l++) {
 					// Edihedral
 					d = c->bonds[l];
 					add_vector(&(d->v), (d->i == atom_offset)?offset:&(zero), &dpos);
-					energy += dihedral_energy(a, b, c, d, &apos, &bpos, &cpos, &dpos, m->model)/2.; // ditto
+					energy += dihedral_energy(d, c, a, b, &dpos, &cpos, &apos, &bpos, m->model)/2.; // ditto
 
 
 
@@ -909,7 +909,8 @@ void propagate(struct Molecule *m, double dn, double dt, int steps, int output_s
 
 	//void process_atom(int id, struct Molecule *m, double dn, double dt, double viscosity, double T) {
 
-	save_xyz(m, fn, "w");
+	if (mode != HEAT)
+		save_xyz(m, fn, "w");
 	for (i = 0; i < steps; i++) {
 		#pragma omp parallel for
 		for (k = 0; k < m->n_atoms; k++) {
