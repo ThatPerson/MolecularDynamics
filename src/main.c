@@ -70,21 +70,21 @@ struct Model {
 struct Atom {
 	struct Vector v;
 	struct Vector vel;
-	int n_bonds;
+	unsigned int n_bonds;
 	int check;
-	int lim_bonds;
+	unsigned int lim_bonds;
 	struct Atom ** bonds;
 	char name[20];
 	int type;
 	int hybridization;
-	int i;
+	unsigned int i;
 	int andersen_f;
 };
 
 /* Molecule container - n_atoms in as struct. */
 struct Molecule {
 	struct Atom *as;
-	int n_atoms;
+	unsigned int n_atoms;
 	struct Model *model;
 	int thermostat;
 };
@@ -119,7 +119,7 @@ double norm_rand(double mean, double std) {
 }
 
 void setup_model(struct Model * m, int model) {
-	int i, k, l, p;
+	int i, k;
 
 	for (i = 0; i < ATOM_TYPES; i++) {
 		for (k = 0; k < ATOM_TYPES; k++) {
@@ -229,7 +229,7 @@ void setup_model(struct Model * m, int model) {
  *  - If not all atoms are allocated, will segfault.
  */
 void reset_check(struct Molecule *m) {
-	int i;
+	unsigned int i;
 	for (i = 0; i < m->n_atoms; i++) {
 		m->as[i].check = FALSE;
 	}
@@ -315,7 +315,7 @@ void set_vector(struct Vector *a, double x, double y, double z) {
  *  - Will double free if any atom has not been initialized.
  */
 void free_atoms(struct Molecule *m) {
-	int i;
+	unsigned int i;
 	for (i = 0; i < m->n_atoms; i++) {
 		free(m->as[i].bonds);
 	}
@@ -335,12 +335,12 @@ void crash(struct Molecule *m) {
  * arg *a: Pointer to initial atom.
  * arg  n: Atom to begin graph at
  */
-void print_moleculef(struct Atom * a, int n) {
+void print_moleculef(struct Atom * a, unsigned int n) {
 	// if we have been visited, terminate execution.
 	if (a->check == TRUE)
 		return;
 	a->check = TRUE;
-	int i,j;
+	unsigned int i,j;
 	for (j = 0; j < n+1; j++) 
 		printf("> ");
 	printf("Atom %s [%f, %f, %f] %d\n", a->name, a->v.x, a->v.y, a->v.z, a->n_bonds);
@@ -359,7 +359,7 @@ void print_molecule(struct Atom * a) {
 	if (a->check == TRUE)
 		return;
 	a->check = TRUE;
-	int i;
+	unsigned int i;
 	printf("%f, %f, %f\n", a->v.x, a->v.y, a->v.z);
 	
 	for (i = 0; i < a->n_bonds; i++) {
@@ -522,7 +522,9 @@ double vdw_energy(struct Atom *a, struct Atom *b, struct Vector *apos, struct Ve
 }
 
 double dihedral_energy(struct Atom *a, struct Atom *b, struct Atom *c, struct Atom *d, struct Vector *apos, struct Vector *bpos, struct Vector *cpos, struct Vector *dpos, struct Model *m) {
-	double omega = calc_omega(apos, bpos, cpos, dpos);	
+    (void)a;
+    (void)d;
+    double omega = calc_omega(apos, bpos, cpos, dpos);
 	
 	// energy = pref * (1 + cos(n omega - gamma))
 	double energy = m->dihedral_n[b->type][c->type] * omega - m->dihedral_gamma[b->type][c->type];
@@ -532,17 +534,14 @@ double dihedral_energy(struct Atom *a, struct Atom *b, struct Atom *c, struct At
 	return energy;
 }
 
-double calc_energy(struct Molecule *m, int atom_offset, struct Vector * offset) {
+double calc_energy(struct Molecule *m, unsigned int atom_offset, struct Vector * offset) {
 	unsigned int i,j,k,l;
 	struct Atom *a,*b,*c,*d;
 	struct Vector zero;
 	zero.x = 0; zero.y = 0; zero.z = 0;
 	struct Vector apos, bpos, cpos, dpos;
-	double K, l0, phi0, phi, divphi, multi, omega, V[3];
 	double energy = 0;
-	double divl;
-	int h_bonds = 0;
-	double vdw, r;
+	double r;
 	for (i = 0; i < m->n_atoms; i++) {
 		a = &(m->as[i]);
 		add_vector(&(a->v), (i == atom_offset)?offset:&(zero), &apos);
@@ -631,7 +630,7 @@ void set_temp_vel(struct Molecule *m, int atomid, double temp) {
 double calc_temperature(struct Molecule *m) {
 	double v;
 	//T = m v^2 / (2k)
-	int i;
+	unsigned int i;
 	double sum = 0, mass;
 	for (i = 0; i < m->n_atoms; i++) {
 		v = magnitude(&(m->as[i].vel));
@@ -648,7 +647,7 @@ void process_atom(int id, struct Molecule *m, double dn, double dt, double visco
 	double Tr = T; //calc_temperature(m);
 	struct Vector o1, o2;
 	struct Vector e_grad;
-	double e1, e2, gradient; 
+	double e1, e2;
 	set_vector(&o1, dn, 0, 0);
 	set_vector(&o2, -dn, 0, 0);
 	e1 = kcal_to_atomic(calc_energy(m, id, &o1));
@@ -673,14 +672,14 @@ void process_atom(int id, struct Molecule *m, double dn, double dt, double visco
 
 	struct Vector accel;
 	// potential term
-	double t1, t2, t3;
-	t1 = -e_grad.x;
+	double t3;
+	//t1 = -e_grad.x;
 	accel.x = -e_grad.x;
 	accel.y = -e_grad.y;
 	accel.z = -e_grad.z;
 	// energy units are amu A^2 ps^-2, so units of gradient are amu A ps^-2.
 	if (m->thermostat == LANGEVIN) {
-		t2 = -viscosity * mass * m->as[id].vel.x;
+		//t2 = -viscosity * mass * m->as[id].vel.x;
 		accel.x -= viscosity * mass * m->as[id].vel.x;
 		accel.y -= viscosity * mass * m->as[id].vel.y;
 		accel.z -= viscosity * mass * m->as[id].vel.z;
@@ -711,7 +710,7 @@ void process_atom(int id, struct Molecule *m, double dn, double dt, double visco
 		// Giving a proportion of molecules which will have collided in that time. 
 		// This proportion of atoms are then assigned random velocity based on the temperature.
 		// Though v in this case is rate of collision, we reuse 'viscosity'.
-		int k = 0;
+		unsigned int k = 0;
 		for (k = 0; k < m->n_atoms; k++)
 			m->as[k].andersen_f = 0;
 		double P = 1000. * viscosity * expl(-viscosity * dt);
@@ -747,7 +746,7 @@ void process_atom(int id, struct Molecule *m, double dn, double dt, double visco
  *       e.g., C-H bond shorter than C-C.
  */
 void bond_xyz(struct Molecule *m, float bl) {
-	int i, j;
+	unsigned int i, j;
 	struct Vector temp;
 	for (i = 0; i < m->n_atoms; i++) {
 		for (j = i+1; j < m->n_atoms; j++) {
@@ -784,8 +783,7 @@ int read_xyz(struct Molecule *m, char *filename) {
 		return -1;
 	}
 	
-	int c_line = 0;
-	int c_atom = 0;
+	unsigned int c_line = 0;
 	struct Atom *ca;
 	while (fgets(line, len, fp)) {
 		if (c_line == 0) {
@@ -813,7 +811,7 @@ int read_xyz(struct Molecule *m, char *filename) {
 			ca->i = c_line-2;
 			char *token = strtok(line, " \t");
 			int i = 0;
-			float x, y, z;
+			float x=0, y=0, z=0;
 			char name[3];
 			// while tokens are left...
 			// i gives the column. First column is atom symbol, then x,y,z.
@@ -854,7 +852,7 @@ int save_xyz(struct Molecule *m, char *filename, char * mode) {
 	double T = calc_temperature(m);
 	fprintf(fp, "%d\n%lf\n", m->n_atoms, T);
 
-	int i;
+	unsigned int i;
 	for (i = 0; i < m->n_atoms; i++) {
 		fprintf(fp, "%2s\t%-2.6f\t%-2.6f\t%-2.6f\n", m->as[i].name, \
 			m->as[i].v.x,\
@@ -870,7 +868,7 @@ int save_xyz(struct Molecule *m, char *filename, char * mode) {
  *  Prints molecule to screen
  */
 int print_dir(struct Molecule *m) {
-	int i;
+	unsigned int i;
 	for (i = 0; i < m->n_atoms; i++) {
 		printf("%d\t%2s\t%-2.6f\t%-2.6f\t%-2.6f\n", i, m->as[i].name, \
 			m->as[i].v.x,\
@@ -904,8 +902,8 @@ void add_vector_sc(struct Vector *a, struct Vector *b, double dt) {
 	a->z += (b->z * dt);
 }
 
-void propagate(struct Molecule *m, double dn, double dt, int steps, int output_step, char fn[500], double temp, double viscosity, int mode) {
-	int i, k;
+void propagate(struct Molecule *m, double dn, double dt, unsigned int steps, unsigned int output_step, char fn[500], double temp, double viscosity, int mode) {
+	unsigned int i, k;
 
 	//void process_atom(int id, struct Molecule *m, double dn, double dt, double viscosity, double T) {
 
@@ -937,7 +935,7 @@ void iterate_once(struct Molecule *m, double dn, double dt, char fn[500], double
 
 
 void heat(struct Molecule *m, double temp, double temp_step, int steps, double dn, double dt, double dnM, double dnT, double viscosity, char fn[500]) {
-	int i;
+	unsigned int i;
 	double T = 0;
 	for (T = 0; T < temp + temp_step; T += temp_step) {
 		for (i = 0; i < m->n_atoms; i++) {
@@ -978,16 +976,11 @@ int run_script(char *filename, struct Molecule *m) {
 		return -1;
 	}
 	
-	int c_line = 0;
-	int c_atom = 0;
-	struct Atom *ca;
-	float bl, theta;
-	int A, B, n;
+	float bl;
 	char command[255];
 	int c;
 	struct Vector zero;
 	double dn, dt, temp, viscosity, temp_step, dnM, dnT;
-	unsigned int i;
 	int steps, output_step;
 	zero.x = 0; zero.y = 0; zero.z = 0;
 	struct Model mod;
@@ -1120,16 +1113,13 @@ int run_script(char *filename, struct Molecule *m) {
  * args SCRIPT: can pass script filename which will be run in.
  */
 int main(int argc, char *argv[]) {
-	int i = 0;
-	float theta = 0;
-
 	struct Molecule mol;
 	mol.n_atoms = 0;
 	mol.model = NULL;
 	mol.thermostat = -1;
 	
 	char command[255];
-	int n, A, B;
+	int n;
 
 	char script_name[255];
 	if (argc >= 2) {
